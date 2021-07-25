@@ -1,0 +1,2 @@
+# dynamite
+Dynamic DNS
