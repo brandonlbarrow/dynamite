@@ -2,32 +2,61 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
-	"log"
-	"net/http"
-
 	"github.com/brandonlbarrow/dynamite/internal/ipify"
 	"github.com/brandonlbarrow/dynamite/internal/route53"
+	"log"
+	"net/http"
 
 	_ "github.com/joho/godotenv/autoload"
 )
 
+type Registrar interface {
+	UpdateIP(ip string, record string, ttl int) error
+}
+
 var (
-	ipifyURL   = "https://api.ipify.org"
-	recordName = "dynamitedemo.brandonbarrow.io"
+	ipifyURL   = flag.String("api", "https://api.ipify.org", "URL to retrieve external API. Optional, defaults to https://api.ipify.org")
+	registrar  = flag.String("registrar", "route53", "DNS registrar.  One of: route53, namecheap.  Optional, Defaults to route53")
+	recordName = flag.String("record", "", "DNS record to update")
 	ttl        = 30
 )
 
 func main() {
-	ip := getIpAddress(ipifyURL)
+	flag.Parse()
+	selectedRegistrar := validateInput()
+	ip := getIpAddress(*ipifyURL)
 	fmt.Printf("ip address is %s\n\n", ip)
-	resp, err := run(ip)
+	resp, err := run(ip, *recordName, ttl, selectedRegistrar)
 	if err != nil {
 		log.Fatal(err)
 	}
 	fmt.Printf("status is: %s\n", resp.ChangeInfo.Status)
 	fmt.Printf("submitted at: %s\n", resp.ChangeInfo.SubmittedAt)
 
+}
+
+func validateInput() Registrar {
+	if recordName == nil || *recordName == "" {
+		panic("--record option required")
+	}
+
+	switch *registrar {
+	case "route53":
+		ctx := context.Background()
+		cfg, err := route53.NewConfig(ctx)
+		if err != nil {
+			return nil
+		}
+		return route53.NewClient(route53.WithCredentials(cfg))
+
+	case "namecheap":
+		//TODO: Do the namecheep
+		return nil
+	default:
+		panic("Valid options for --registrar are: route53, namecheap")
+	}
 }
 
 func getIpAddress(url string) string {
@@ -44,25 +73,7 @@ func getIpAddress(url string) string {
 
 }
 
-func run(ip string) (*route53.RecordSetResponse, error) {
-	ctx := context.Background()
-	cfg, err := route53.NewConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-	client := route53.NewClient(route53.WithCredentials(cfg))
-	zones, err := client.ListZones(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, z := range zones.HostedZones {
-		if z.Id == nil {
-			continue
-		}
-		req := route53.NewRecordSetRequest(recordName, ip, *z.Id, int64(ttl))
-		if len(zones.HostedZones) == 1 {
-			return client.UpsertRecordSet(ctx, req)
-		}
-	}
+func run(ip string, record string, ttl int, selectedRegistrar Registrar) (*route53.RecordSetResponse, error) {
+	selectedRegistrar.UpdateIP(ip, record, ttl)
 	return nil, nil
 }
