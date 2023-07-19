@@ -5,9 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"github.com/brandonlbarrow/dynamite/internal/ipify"
+	"github.com/brandonlbarrow/dynamite/internal/namecheap"
 	"github.com/brandonlbarrow/dynamite/internal/route53"
 	"log"
 	"net/http"
+	"os"
+	"time"
 
 	_ "github.com/joho/godotenv/autoload"
 )
@@ -18,7 +21,7 @@ type Registrar interface {
 
 var (
 	ipifyURL   = flag.String("api", "https://api.ipify.org", "URL to retrieve external API. Optional, defaults to https://api.ipify.org")
-	registrar  = flag.String("registrar", "route53", "DNS registrar.  One of: route53, namecheap.  Optional, Defaults to route53")
+	registrar  = flag.String("registrar", "route53", "DNS registrar.  One of: route53, namecheap, dnsimple.  Optional, Defaults to route53")
 	recordName = flag.String("record", "", "DNS record to update")
 	ttl        = 30
 )
@@ -28,13 +31,12 @@ func main() {
 	selectedRegistrar := validateInput()
 	ip := getIpAddress(*ipifyURL)
 	fmt.Printf("ip address is %s\n\n", ip)
-	resp, err := run(ip, *recordName, ttl, selectedRegistrar)
+	err := run(ip, *recordName, ttl, selectedRegistrar)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("status is: %s\n", resp.ChangeInfo.Status)
-	fmt.Printf("submitted at: %s\n", resp.ChangeInfo.SubmittedAt)
 
+	fmt.Printf("Updated %s to %s", *recordName, ip)
 }
 
 func validateInput() Registrar {
@@ -52,8 +54,13 @@ func validateInput() Registrar {
 		return route53.NewClient(route53.WithCredentials(cfg))
 
 	case "namecheap":
-		//TODO: Do the namecheep
-		return nil
+		domain := os.Getenv("DOMAIN")
+		password := os.Getenv("DDNS_PASSWORD")
+		if domain == "" || password == "" {
+			panic("DOMAIN and DDNS_PASSWORD required in environment")
+		}
+		netClient := &http.Client{Timeout: 10 * time.Second}
+		return namecheap.NewClient(domain, password, netClient)
 	default:
 		panic("Valid options for --registrar are: route53, namecheap")
 	}
@@ -70,10 +77,8 @@ func getIpAddress(url string) string {
 		panic(err)
 	}
 	return string(addr)
-
 }
 
-func run(ip string, record string, ttl int, selectedRegistrar Registrar) (*route53.RecordSetResponse, error) {
-	selectedRegistrar.UpdateIP(ip, record, ttl)
-	return nil, nil
+func run(ip string, record string, ttl int, selectedRegistrar Registrar) error {
+	return selectedRegistrar.UpdateIP(ip, record, ttl)
 }
