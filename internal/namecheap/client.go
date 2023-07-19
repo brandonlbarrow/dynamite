@@ -29,7 +29,7 @@ func (c *Client) UpdateIP(ip string, recordName string, ttl int) error {
 		return err
 	}
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return errors.New("Error updating record: " + resp.Status)
 	}
 
