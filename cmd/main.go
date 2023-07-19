@@ -2,32 +2,68 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
+	"github.com/brandonlbarrow/dynamite/internal/ipify"
+	"github.com/brandonlbarrow/dynamite/internal/namecheap"
+	"github.com/brandonlbarrow/dynamite/internal/route53"
 	"log"
 	"net/http"
-
-	"github.com/brandonlbarrow/dynamite/internal/ipify"
-	"github.com/brandonlbarrow/dynamite/internal/route53"
+	"os"
+	"time"
 
 	_ "github.com/joho/godotenv/autoload"
 )
 
+type Registrar interface {
+	UpdateIP(ip string, record string, ttl int) error
+}
+
 var (
-	ipifyURL   = "https://api.ipify.org"
-	recordName = "dynamitedemo.brandonbarrow.io"
+	ipifyURL   = flag.String("api", "https://api.ipify.org", "URL to retrieve external API. Optional, defaults to https://api.ipify.org")
+	registrar  = flag.String("registrar", "route53", "DNS registrar.  One of: route53, namecheap, dnsimple.  Optional, Defaults to route53")
+	recordName = flag.String("record", "", "DNS record to update")
 	ttl        = 30
 )
 
 func main() {
-	ip := getIpAddress(ipifyURL)
+	flag.Parse()
+	selectedRegistrar := validateInput()
+	ip := getIpAddress(*ipifyURL)
 	fmt.Printf("ip address is %s\n\n", ip)
-	resp, err := run(ip)
+	err := run(ip, *recordName, ttl, selectedRegistrar)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("status is: %s\n", resp.ChangeInfo.Status)
-	fmt.Printf("submitted at: %s\n", resp.ChangeInfo.SubmittedAt)
 
+	fmt.Printf("Updated %s to %s", *recordName, ip)
+}
+
+func validateInput() Registrar {
+	if recordName == nil || *recordName == "" {
+		panic("--record option required")
+	}
+
+	switch *registrar {
+	case "route53":
+		ctx := context.Background()
+		cfg, err := route53.NewConfig(ctx)
+		if err != nil {
+			return nil
+		}
+		return route53.NewClient(route53.WithCredentials(cfg))
+
+	case "namecheap":
+		domain := os.Getenv("DOMAIN")
+		password := os.Getenv("DDNS_PASSWORD")
+		if domain == "" || password == "" {
+			panic("DOMAIN and DDNS_PASSWORD required in environment")
+		}
+		netClient := &http.Client{Timeout: 10 * time.Second}
+		return namecheap.NewClient(domain, password, netClient)
+	default:
+		panic("Valid options for --registrar are: route53, namecheap")
+	}
 }
 
 func getIpAddress(url string) string {
@@ -41,28 +77,8 @@ func getIpAddress(url string) string {
 		panic(err)
 	}
 	return string(addr)
-
 }
 
-func run(ip string) (*route53.RecordSetResponse, error) {
-	ctx := context.Background()
-	cfg, err := route53.NewConfig(ctx)
-	if err != nil {
-		return nil, err
-	}
-	client := route53.NewClient(route53.WithCredentials(cfg))
-	zones, err := client.ListZones(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, z := range zones.HostedZones {
-		if z.Id == nil {
-			continue
-		}
-		req := route53.NewRecordSetRequest(recordName, ip, *z.Id, int64(ttl))
-		if len(zones.HostedZones) == 1 {
-			return client.UpsertRecordSet(ctx, req)
-		}
-	}
-	return nil, nil
+func run(ip string, record string, ttl int, selectedRegistrar Registrar) error {
+	return selectedRegistrar.UpdateIP(ip, record, ttl)
 }

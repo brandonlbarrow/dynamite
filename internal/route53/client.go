@@ -2,6 +2,7 @@ package route53
 
 import (
 	"context"
+	"errors"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -91,4 +92,25 @@ func (c *Client) UpsertRecordSet(ctx context.Context, req *RecordSetRequest) (*R
 		return nil, err
 	}
 	return &RecordSetResponse{resp}, nil
+}
+
+func (c *Client) UpdateIP(ip string, recordName string, ttl int) error {
+	ctx := context.Background()
+	zones, err := c.ListZones(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, z := range zones.HostedZones {
+		if z.Id == nil {
+			continue
+		}
+		req := NewRecordSetRequest(recordName, ip, *z.Id, int64(ttl))
+		if len(zones.HostedZones) == 1 {
+			_, err = c.UpsertRecordSet(ctx, req)
+			return err
+		}
+	}
+
+	return errors.New("record not found")
 }
