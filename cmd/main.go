@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/brandonlbarrow/dynamite/internal/dnsimple"
 	"github.com/brandonlbarrow/dynamite/internal/ipify"
 	"github.com/brandonlbarrow/dynamite/internal/namecheap"
 	"github.com/brandonlbarrow/dynamite/internal/route53"
@@ -61,6 +62,13 @@ func validateInput() Registrar {
 		}
 		netClient := &http.Client{Timeout: 10 * time.Second}
 		return namecheap.NewClient(domain, password, netClient)
+	case "dnsimple":
+		token := os.Getenv("TOKEN")
+		domain := os.Getenv("DOMAIN")
+		if token == "" || domain == "" {
+			panic("TOKEN and DOMAIN required in environment for dnsimple")
+		}
+		return dnsimple.NewClient(token, domain)
 	default:
 		panic("Valid options for --registrar are: route53, namecheap")
 	}
